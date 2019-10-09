@@ -120,7 +120,6 @@ getRetVsT <- function(returns, df_canidates = c(1, 2, 4, 6, 10, 20)) {
   do.call(grid.arrange, c(plots, top = "QQ-Plot: returns vs t-distribution"))
 }
 
-
 getRetDensityVsNorm <- function(returns) {
   data <- data.table(x = seq(min(returns), max(returns), length.out = length(returns)), y = returns)
   
@@ -168,8 +167,29 @@ commodites <- lapply(energy.commodities, FUN = function( s ) {
 
 names(commodites) <- energy.commodities
 
+getRetNormQuantiles(rnorm(2000), desc = "RNORM (baseline)") # for reference
+
+#### RB
+
 plotReturns("rb", commodites)
+
+rb.ret <- commodites$rb$logReturn
+
+getRetVsT(rb.ret) # t-distribution, df = 6
+
+getRetDensityVsNorm(rb.ret) # strogest fit: median / mad
+
+getRetNormQuantiles(rb.ret, desc = "RO")
+
+#### HO
+
 plotReturns("ho", commodites)
 
+ho.ret <- commodites$ho$logReturn
 
+getRetVsT(ho.ret) # t-distribution, df = 4, watch out for the heavy tail
+
+getRetDensityVsNorm(ho.ret) # strogest fit: median / mad
+
+getRetNormQuantiles(ho.ret, desc = "HO")
 
