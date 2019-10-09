@@ -53,7 +53,6 @@ trading.symbols <- colnames(data.energy)[
     !str_contains(symbol, "_")
   })]
 
-
 data <- data.energy
 
 # Utility Functions
@@ -72,7 +71,7 @@ getDataForSymbol <- function( symbol, data = data.energy ) {
     str_replace(c, paste0(symbol, "_"), "") }, simplify = T))
   
   
-  data.symbol$spotPrice <- data.symbol[["backward_adjusted"]]
+  data.symbol$spotPrice <- data.symbol[["settle"]]
   
   # calculate returns from prices
   prices <- data.symbol$spotPrice
@@ -219,7 +218,7 @@ getRetDensityVsNorm(ho.ret) # strogest fit: median / mad
 
 getRetNormQuantiles(ho.ret, desc = "HO")
 
-symbol <- "ho"
+symbol <- "rb"
 start_date <- "2019-1-1"
 
 candlestick(symbol, start_date, commodites)
