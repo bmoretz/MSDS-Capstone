@@ -22,6 +22,8 @@ library(Metrics)
 library(stringr)
 library(Rtsne)
 library(plotly)
+library(Quandl)
+library(tidyverse)
 
 #####################################################################
 ######################### EDA #######################################
@@ -41,45 +43,31 @@ theme_update(plot.title = element_text(hjust = 0.5),
              legend.position = "top", legend.title = element_blank())
 
 # Data files
-data.energy <- read_csv( file = "energy_2015year_master.csv") 
+data.energy <- read_csv( file = "northwestern_energy_master.csv") 
 data.symbology <- read_csv( file = "global_index_description.csv")
 
 # Global Symbol look-up
 trading.symbols <- colnames(data.energy)[
   sapply(colnames(data.energy), FUN = function(symbol) {
-  !str_contains(symbol, "_")
-})]
+    !str_contains(symbol, "_")
+  })]
 
 
 # Utility Functions
 
 getDataForSymbol <- function( symbol, data = data.energy ) {
-  fwd.points <- c(1, 2, 3, 4, 5, 10, 15, 20, 30, 60, 90, 180, 365)
   
-  price.points <- c(symbol, 
-    sapply(fwd.points, FUN = function( fp ) { 
-      paste0( symbol, "_", fp, "FD")
-    })
-  )
+  base.cols <- c("open", "high", "low", "last", "settle", "volume",	"open_interest", "backward_adjusted")
   
-  calendar.days <- c("trade_date",
-    sapply(fwd.points, FUN = function( fp ) { 
-      paste0( "calendar_", fp)
-    })
-  )
+  symbol.cols <- c("trade_date", as.vector(sapply(base.cols, function( c ) { paste0(symbol, "_", c) }, simplify = T)))
   
-  columns <- c(price.points, calendar.days)
-  
-  data[, columns]
-
-  columns <- c(price.points, calendar.days)
-  
-  data.symbol <- data[, columns]
+  data.symbol <- data[, symbol.cols]
   data.symbol <- data.symbol[order(data.symbol$trade_date),]
   
+  data.symbol$spotPrice <- data.symbol[[paste0(symbol, "_backward_adjusted")]]
   
   # calculate returns from prices
-  prices <- data.symbol[[symbol]]
+  prices <- data.symbol$spotPrice
   n <- length(prices)
   ret <- prices[-1] / prices[-n] - 1
   
@@ -87,13 +75,13 @@ getDataForSymbol <- function( symbol, data = data.energy ) {
   data.symbol$return <- c(0, ret)
   data.symbol$logReturn <- log(1 + data.symbol$return)
   
-  colnames(data.symbol[symbol]) <- "spotPrice"
   data.symbol[-1,] # throw away the first record that has no return data.
 }
 
-plotReturns <- function( symbol, start_date = "2019-1-1", data ){ 
-
-  data.plot <- data[data$trade_date >= start_date, c("trade_date", "RB", "return", "logReturn")]
+plotReturns <- function( symbol, energy_data, start_date = "2019-1-1" ){ 
+  
+  data <- energy_data[[symbol]]
+  data.plot <- data[data$trade_date >= start_date, c("trade_date", "spotPrice", "return", "logReturn")]
   
   p1 <- ggplot(data.plot, aes(trade_date, return)) +
     geom_line()
@@ -107,18 +95,81 @@ plotReturns <- function( symbol, start_date = "2019-1-1", data ){
   p4 <- ggplot(data.plot, aes(logReturn, fill = ..count..)) +
     geom_histogram()
   
-  grid.arrange(p1, p2, p3, p4, nrow = 2)
+  grid.arrange(p1, p2, p3, p4, nrow = 2, top = paste("Returns for", symbol, " since ", start_date))
 }
 
-symbol <- "RB"
-data.rb <- getDataForSymbol(symbol)
+getRetVsT <- function(returns, df_canidates = c(1, 2, 4, 6, 10, 20)) {
+  plots <- lapply(df_canidates, function(df) {
+    
+    n <- length(returns)
+    q_range <- (1:n) / (n+1)
+    
+    data <- data.table(ret = returns, theoretical = qt(q_range, df))
+    data$theoretical <- sort(data$theoretical)
+    
+    model <- lm(qt(c(0.25,0.75), df = df) ~ quantile(data$ret,c(0.25,0.75)))
+    
+    ggplot(data, aes(x = sort(ret), y = theoretical)) +
+      geom_abline(col = 'cornflowerblue', lwd = 1.3, slope = model$coefficients[2], intercept = model$coefficients[1]) +
+      geom_point() +
+      labs(title = paste("df = ", df), 
+           x = "returns",
+           y = "theoretical")
+  })
+  
+  do.call(grid.arrange, c(plots, top = "QQ-Plot: returns vs t-distribution"))
+}
 
-plotReturns(symbol, data = data.rb)
 
-energy.commodities <- c("CL", "HO", "RB", "SC")
+getRetDensityVsNorm <- function(returns) {
+  data <- data.table(x = seq(min(returns), max(returns), length.out = length(returns)), y = returns)
+  
+  ggplot(data, aes(y)) +
+    geom_density(aes(col = "KDE"), lwd = 1) +
+    geom_line(aes(x, dnorm(x, mean = mean(returns), sd = sd(returns)), col = "normal(mean, sd)"), lwd = 1.1, linetype = "longdash") +
+    geom_line(aes(x, dnorm(x, mean = median(returns), sd = mad(returns)), col = "normal(median, mad)"), lwd = 1.1, linetype = "dashed") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(title = paste("KDE: Returns Vs Normal, n=", nrow(data)), y = "density", x = "") +
+    theme(legend.position = "right")
+}
+
+getRetNormQuantiles <- function(returns, quantiles = c(0.25,0.1,0.05,0.025,0.01,0.0025), desc = "") {
+  plots <- lapply(quantiles, function(p) {
+    
+    p_value <- p
+    n <- length(returns)
+    q_range <- (1:n) / (n+1)
+    
+    data <- data.table(ret = returns, theoretical = qnorm(q_range))
+    data$theoretical <- sort(data$theoretical)
+    
+    model <- lm(qnorm(c(p_value, 1-p_value)) ~ quantile(data$ret, c(p_value, 1-p_value)))
+    
+    ggplot(data, aes(x = sort(ret), y = theoretical)) +
+      geom_abline(col = 'cornflowerblue', lwd = 1.3, slope = model$coefficients[2], intercept = model$coefficients[1]) +
+      geom_point() +
+      labs(title = paste("p = ", p_value), 
+           x = "returns",
+           y = "theoretical")
+  })
+  
+  do.call(grid.arrange, c(plots, top = paste(desc, "vs Normal Quantiles")))
+}
+
+###############################################################
+# EDA
+##############################################################
+
+energy.commodities <- c("rb", "ho")
 
 commodites <- lapply(energy.commodities, FUN = function( s ) {
   getDataForSymbol(s)
 })
 
-commodites[[1]]
+names(commodites) <- energy.commodities
+
+plotReturns("rb", commodites)
+plotReturns("ho", commodites)
+
+
+
