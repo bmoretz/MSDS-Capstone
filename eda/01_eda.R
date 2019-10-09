@@ -24,6 +24,7 @@ library(Rtsne)
 library(plotly)
 library(Quandl)
 library(tidyverse)
+library(quantmod)
 
 #####################################################################
 ######################### EDA #######################################
@@ -53,18 +54,25 @@ trading.symbols <- colnames(data.energy)[
   })]
 
 
+data <- data.energy
+
 # Utility Functions
 
 getDataForSymbol <- function( symbol, data = data.energy ) {
   
   base.cols <- c("open", "high", "low", "last", "settle", "volume",	"open_interest", "backward_adjusted")
   
-  symbol.cols <- c("trade_date", as.vector(sapply(base.cols, function( c ) { paste0(symbol, "_", c) }, simplify = T)))
+  symbol.cols <- c("trade_date", as.vector(sapply(base.cols, function( c ) { 
+    paste0(symbol, "_", c) }, simplify = T)))
   
   data.symbol <- data[, symbol.cols]
   data.symbol <- data.symbol[order(data.symbol$trade_date),]
   
-  data.symbol$spotPrice <- data.symbol[[paste0(symbol, "_backward_adjusted")]]
+  colnames(data.symbol) <- as.vector(sapply(colnames(data.symbol), FUN = function(c) { 
+    str_replace(c, paste0(symbol, "_"), "") }, simplify = T))
+  
+  
+  data.symbol$spotPrice <- data.symbol[["backward_adjusted"]]
   
   # calculate returns from prices
   prices <- data.symbol$spotPrice
@@ -74,6 +82,8 @@ getDataForSymbol <- function( symbol, data = data.energy ) {
   # store it
   data.symbol$return <- c(0, ret)
   data.symbol$logReturn <- log(1 + data.symbol$return)
+  
+  colnames(data.symbol)
   
   data.symbol[-1,] # throw away the first record that has no return data.
 }
@@ -155,6 +165,22 @@ getRetNormQuantiles <- function(returns, quantiles = c(0.25,0.1,0.05,0.025,0.01,
   do.call(grid.arrange, c(plots, top = paste(desc, "vs Normal Quantiles")))
 }
 
+candlestick <- function(symbol, start_date, data = commodites ) {
+  data[[symbol]][data[[symbol]]$trade_date >= start_date,] %>% 
+    plot_ly(x = ~trade_date, type = "candlestick",
+            open = ~open, close = ~spotPrice,
+            high = ~high, low = ~low) %>%
+    add_lines(x = ~trade_date, y = ~open, line = list(color = 'black', width = 0.75), inherit = F) %>%
+    layout(title = paste(symbol, "activity since", start_date))
+}
+
+###############################################################
+# Indexes
+##############################################################
+
+indices <- colnames(data.energy)[colnames(data.energy) %in% data.symbology$Symbol]
+
+
 ###############################################################
 # EDA
 ##############################################################
@@ -193,3 +219,7 @@ getRetDensityVsNorm(ho.ret) # strogest fit: median / mad
 
 getRetNormQuantiles(ho.ret, desc = "HO")
 
+symbol <- "ho"
+start_date <- "2019-1-1"
+
+candlestick(symbol, start_date, commodites)
