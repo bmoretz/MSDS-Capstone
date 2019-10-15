@@ -183,15 +183,55 @@ getCorr <- function( data = commodites ) {
              title = "Energy Commodity Correlations")
 }
 
+candlestick <- function(symbol, start_date = "2019-1-1", data = commodites ) {
 
-candlestick <- function(symbol, start_date, data = commodites ) {
-  data[[symbol]][data[[symbol]]$nymex_date >= start_date,] %>% 
+  desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
+  
+  d <- data[[symbol]][data[[symbol]]$nymex_date >= start_date,]
+  p <- d %>% 
     plot_ly(x = ~nymex_date, type = "candlestick",
             open = ~open, close = ~spotPrice,
             high = ~high, low = ~low) %>%
     add_lines(x = ~nymex_date, y = ~open, line = list(color = 'black', width = 0.75), inherit = F) %>%
     layout(title = paste(symbol, "activity since", start_date))
+  
+  v <- d %>% 
+    plot_ly(x = ~nymex_date, y = ~volume, type='bar', name = "Volume",
+            colors = c('#17BECF','#7F7F7F'))
+  
+  rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+             xanchor = 'center', yref = 'paper',
+             font = list(size = 9),
+             buttons = list(
+               list(count=1,
+                    label='RESET',
+                    step='all'),
+               list(count=1,
+                    label='1 YR',
+                    step='year',
+                    stepmode='backward'),
+               list(count=3,
+                    label='3 MO',
+                    step='month',
+                    stepmode='backward'),
+               list(count=1,
+                    label='1 MO',
+                    step='month',
+                    stepmode='backward')
+             ))
+  
+  pp <- subplot(p, v, heights = c(0.7,0.2), nrows=2,
+               shareX = TRUE, titleY = TRUE) %>%
+    layout(title = paste( desc, " : ", format(as.Date(start_date), "%b %d %Y"), "-", format(as.Date(max(d$nymex_date)), "%b %d %Y")),
+           xaxis = list(rangeselector = rs),
+           legend = list(orientation = 'h', x = 0.5, y = 1,
+                         xanchor = 'center', yref = 'paper',
+                         font = list(size = 10),
+                         bgcolor = 'transparent'))
+  pp
 }
+
+candlestick("ho")
 
 ###############################################################
 # Indexes
@@ -230,6 +270,11 @@ getRetDensityVsNorm(rb.ret) # strogest fit: median / mad
 
 getRetNormQuantiles(rb.ret, desc = "RO")
 
+symbol <- "rb"
+start_date <- "2019-6-1"
+
+candlestick(symbol, start_date, commodites)
+
 #### HO
 
 plotReturns("ho", commodites)
@@ -242,7 +287,25 @@ getRetDensityVsNorm(ho.ret) # strogest fit: median / mad
 
 getRetNormQuantiles(ho.ret, desc = "HO")
 
-symbol <- "rb"
+symbol <- "ho"
 start_date <- "2019-1-1"
 
 candlestick(symbol, start_date, commodites)
+
+#### CL
+
+plotReturns("cl", commodites)
+
+cl.ret <- commodites$cl$logReturn
+
+getRetVsT(cl.ret) # t-distribution, df = 4, watch out for the heavy tail
+
+getRetDensityVsNorm(cl.ret) # strogest fit: median / mad
+
+getRetNormQuantiles(cl.ret, desc = "CL")
+
+symbol <- "cl"
+start_date <- "2019-6-1"
+
+candlestick(symbol, start_date, commodites)
+
