@@ -25,6 +25,7 @@ library(plotly)
 library(Quandl)
 library(tidyverse)
 library(quantmod)
+library(ggcorrplot)
 
 #####################################################################
 ######################### EDA #######################################
@@ -44,8 +45,8 @@ theme_update(plot.title = element_text(hjust = 0.5),
              legend.position = "top", legend.title = element_blank())
 
 # Data files
-data.energy <- read_csv( file = "northwestern_energy_master.csv") 
-data.symbology <- read_csv( file = "global_index_description.csv")
+data.energy <- read_csv( file = "northwestern_energy_all_energy_ohlc.csv") 
+data.symbology <- read_csv( file = "symbol_description.csv")
 
 # Global Symbol look-up
 trading.symbols <- colnames(data.energy)[
@@ -59,20 +60,20 @@ data <- data.energy
 
 getDataForSymbol <- function( symbol, data = data.energy ) {
   
-  base.cols <- c("open", "high", "low", "last", "settle", "volume",	"open_interest", "backward_adjusted")
+  base.cols <- c("open", "high", "low", "close", "volume")
   
-  symbol.cols <- c("trade_date", as.vector(sapply(base.cols, function( c ) { 
+  symbol.cols <- c("nymex_date", as.vector(sapply(base.cols, function( c ) { 
     paste0(symbol, "_", c) }, simplify = T)))
   
   data.symbol <- data[, symbol.cols]
-  data.symbol <- data.symbol[order(data.symbol$trade_date),]
+  data.symbol <- data.symbol[order(data.symbol$nymex_date),]
   
   colnames(data.symbol) <- as.vector(sapply(colnames(data.symbol), FUN = function(c) { 
     str_replace(c, paste0(symbol, "_"), "") }, simplify = T))
   
-  
-  data.symbol$spotPrice <- data.symbol[["settle"]]
-  
+  data.symbol <- data.symbol[complete.cases(data.symbol),]
+  data.symbol$spotPrice <- data.symbol[["close"]]
+
   # calculate returns from prices
   prices <- data.symbol$spotPrice
   n <- length(prices)
@@ -84,18 +85,18 @@ getDataForSymbol <- function( symbol, data = data.energy ) {
   
   colnames(data.symbol)
   
-  data.symbol[-1,] # throw away the first record that has no return data.
+  data.symbol[-c(1:2),] # throw away the first record that has no return data.
 }
 
 plotReturns <- function( symbol, energy_data, start_date = "2019-1-1" ){ 
   
   data <- energy_data[[symbol]]
-  data.plot <- data[data$trade_date >= start_date, c("trade_date", "spotPrice", "return", "logReturn")]
+  data.plot <- data[data$nymex_date >= start_date, c("nymex_date", "spotPrice", "return", "logReturn")]
   
-  p1 <- ggplot(data.plot, aes(trade_date, return)) +
+  p1 <- ggplot(data.plot, aes(nymex_date, return)) +
     geom_line()
   
-  p2 <- ggplot(data.plot, aes(trade_date, logReturn)) +
+  p2 <- ggplot(data.plot, aes(nymex_date, logReturn)) +
     geom_line()
   
   p3 <- ggplot(data.plot, aes(return, fill = ..count..)) +
@@ -164,12 +165,31 @@ getRetNormQuantiles <- function(returns, quantiles = c(0.25,0.1,0.05,0.025,0.01,
   do.call(grid.arrange, c(plots, top = paste(desc, "vs Normal Quantiles")))
 }
 
+getCorr <- function( data = commodites ) {
+  ret <- data.table()
+  
+  for(symbol in names(data)) {
+    s <- data.table(return = data[[symbol]]$logReturn)
+    colnames(s) <- symbol
+    
+    ret <- cbind(ret, s)
+  }
+  
+  ggcorrplot(cor(ret),
+             type = "lower",
+             method = "circle",
+             colors = c("tomato2", "white", "springgreen3"),
+             lab_size = 3,
+             title = "Correlogram of Energy Commodities")
+}
+
+
 candlestick <- function(symbol, start_date, data = commodites ) {
-  data[[symbol]][data[[symbol]]$trade_date >= start_date,] %>% 
-    plot_ly(x = ~trade_date, type = "candlestick",
+  data[[symbol]][data[[symbol]]$nymex_date >= start_date,] %>% 
+    plot_ly(x = ~nymex_date, type = "candlestick",
             open = ~open, close = ~spotPrice,
             high = ~high, low = ~low) %>%
-    add_lines(x = ~trade_date, y = ~open, line = list(color = 'black', width = 0.75), inherit = F) %>%
+    add_lines(x = ~nymex_date, y = ~open, line = list(color = 'black', width = 0.75), inherit = F) %>%
     layout(title = paste(symbol, "activity since", start_date))
 }
 
@@ -184,7 +204,7 @@ indices <- colnames(data.energy)[colnames(data.energy) %in% data.symbology$Symbo
 # EDA
 ##############################################################
 
-energy.commodities <- c("rb", "ho")
+energy.commodities <- c("cl", "sc", "hp", "mt", "ng", "qa", "qg", "ve", "rb", "ho")
 
 commodites <- lapply(energy.commodities, FUN = function( s ) {
   getDataForSymbol(s)
@@ -193,6 +213,10 @@ commodites <- lapply(energy.commodities, FUN = function( s ) {
 names(commodites) <- energy.commodities
 
 getRetNormQuantiles(rnorm(2000), desc = "RNORM (baseline)") # for reference
+
+## Symbol Simple Correlations (Pearson)
+
+getCorr(commodites)
 
 #### RB
 
