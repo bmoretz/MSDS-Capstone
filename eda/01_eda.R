@@ -180,7 +180,7 @@ getCorr <- function( data = commodites ) {
              method = "circle",
              colors = c("tomato2", "white", "springgreen3"),
              lab_size = 3,
-             title = "Correlogram of Energy Commodities")
+             title = "Energy Commodity Correlations")
 }
 
 
