@@ -26,6 +26,8 @@ library(Quandl)
 library(tidyverse)
 library(quantmod)
 library(ggcorrplot)
+library(tidyquant)
+library(timetk)
 
 #####################################################################
 ######################### EDA #######################################
@@ -231,6 +233,19 @@ candlestick <- function(symbol, start_date = "2019-1-1", data = commodites ) {
   pp
 }
 
+pretty_kable <- function(data, title, dig = 2) {
+  kable(data, caption = title, digits = dig) %>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+}
+
+getCorTable <- function( values ) {
+  p.table <- data.table(round(values, 4), keep.rownames = T)
+  
+  formattable(p.table, align = c("l", "c", "c", "c", "r"),
+              list(`Indicator Name` = formatter("span", style = ~style(color = "grey", font.weight = "bold"))
+              ))
+}
+
 ###############################################################
 # Indexes
 ##############################################################
@@ -255,6 +270,7 @@ getRetNormQuantiles(rnorm(2000), desc = "RNORM (baseline)") # for reference
 ## Symbol Simple Correlations (Pearson)
 
 getCorr(commodites)
+
 
 #### RB
 
@@ -306,4 +322,117 @@ symbol <- "cl"
 start_date <- "2019-6-1"
 
 candlestick(symbol, start_date, commodites)
+
+########
+###### Crude
+
+getReturnsForSymbol <- function( symbol, data = commodites ) {
+  r <- as.data.table(commodites[[symbol]][, c("nymex_date", "logReturn")])[, .(Date = nymex_date, Return = logReturn)]
+  colnames(r)[2] <- symbol
+  
+  r
+}
+
+brent <- getReturnsForSymbol("sc")
+wti <- getReturnsForSymbol("cl")
+gulf <- getReturnsForSymbol("mt")
+ve <- getReturnsForSymbol("ve")
+gas <- getReturnsForSymbol("rb")
+natgas <- getReturnsForSymbol("ng")
+ho <- getReturnsForSymbol("ho")
+
+crude.wide <- merge(merge(merge(brent, wti, on = c("Date")), gulf, on = c("Date")), ve, on = c("Date"))
+
+commodity.wide <- merge(merge(merge(crude.wide, gas, on = c("Date")), natgas, on = c("Date")), ho, on = c("Date"))
+
+### Correlations
+
+p <- cor(crude.wide[, 2:5], method = c("pearson"))
+getCorTable(p)
+
+k <- cor(crude.wide[, 2:5], method = c("kendall"))
+getCorTable(k)
+
+s <- cor(crude.wide[, 2:5], method = c("spearman"))
+getCorTable(s)
+
+crude.dt <- crude.wide[crude.wide$Date >= "2018-1-1" & crude.wide$Date <= "2018-12-31",]
+
+ggplot(crude.dt, aes(x = Date)) +
+  geom_line(aes(y = cl), lwd = .8, col = "cornflowerblue") +
+  geom_line(aes(y = mt), lwd = .8, col = "orange", alpha = .7) +
+  labs(title = "WTI vs Gulf Sour", y = "Return")
+
+crude.dt <- crude.long[crude.wide$Date >= "2018-6-1" & crude.wide$Date <= "2018-8-31",]
+
+ggplot(crude.dt, aes(x = Date)) +
+  geom_line(aes(y = cl), lwd = .8, col = "cornflowerblue") +
+  geom_line(aes(y = mt), lwd = .8, col = "orange", alpha = .7) +
+  labs(title = "WTI vs Gulf Sour", y = "Return")
+
+
+ggplot(crude.dt, aes(x = cl, y = mt)) +
+  geom_point(col = "black") +
+  geom_smooth() +
+  labs(title = "WTI vs Gulf Sour", x = "WTI", y = "Gulf Sour")
+
+##### Wide Format
+## Dist of Returns
+
+commodity.long <- melt(commodity.wide, id.var = c("Date"),
+                   variable.name = "Symbol",
+                   value.name = "Return")
+commodity.long$Symbol <- toupper(commodity.long$Symbol)
+
+data.symbology <- data.symbology[, 1:2]
+commodity.long <- merge(commodity.long, data.symbology, on = c("Symbol"))
+
+commodity.long %>%
+  ggplot(aes(x = Return, fill = Description)) +
+  #geom_histogram(aes(y = ..density..),alpha = 0.45, binwidth = 0.005) +
+  geom_density(aes(y = ..density..), alpha = 0.35) +
+  ggtitle("Monthly Returns Since 2014") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+commodity.long %>%
+  ggplot(aes(x = Return, fill = Description)) +
+  geom_histogram(aes(y = ..density..),alpha = 0.45, binwidth = 0.005) +
+  ggtitle("Monthly Returns Since 2014") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+
+getRetVsT(commodites$ve$logReturn, 1:6)
+
+# convert to monthly prices.
+
+commodites.monthly <- commodity.wide %>%
+  tk_xts(date_var = date) %>%
+  to.monthly(indexAt = "lastof",
+             OHLC = F)
+
+commodity.long %>%
+  ggplot(aes(x = Return, y = ..density..)) +
+  geom_density(aes(color = Symbol), alpha = 1) +
+  geom_histogram(aes(fill = Symbol), alpha = 0.45, binwidth = 0.01) +
+  facet_wrap(~Symbol) +
+  ggtitle("Monthly Returns Density Since 2013") +
+  xlab("monthly returns") +
+  ylab("distribution") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+commodites.monthly %>%
+  ggplot(aes(x = Return, fill = Description)) +
+  geom_histogram(aes(y = ..density..),alpha = 0.45, binwidth = 0.005) +
+  ggtitle("Monthly Returns Since 2014") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+# Verfiy Import
+head(commodites.monthly, 3)
+
+crude.long <-
+  commodity.wide %>%
+  tq_portfolio(assets_col = Symbol,
+               returns_col = Return,
+               col_rename = "returns",
+               rebalance_on = "months")
 

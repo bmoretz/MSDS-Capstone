@@ -38,9 +38,9 @@ PET_WD0ST_NUS_1_W,"U.S. Ending Stocks of Distillate Fuel Oil, 0 to 15 ppm Sulfur
 PET_WCSSTUS1_W,"U.S. Ending Stocks of Crude Oil in SPR, Weekly",,,,,,,,,,,,,,,,,
 PET_WCRSTUS1_W,"U.S. Ending Stocks of Crude Oil, Weekly",,,,,,,,,,,,,,,,,
 PET_WCRRIUS2_W,"U.S. Refiner Net Input of Crude Oil, Weekly",,,,,,,,,,,,,,,,,
-PET_WCESTUS1_W,"U.S. Ending Stocks excluding SPR of Crude Oil, Weekly",,,,,,,,,,,,,,,,1.65,
-PET_WBCSTUS1_W,"U.S. Ending Stocks of Gasoline Blending Components, Weekly",,,,,,,,,,,,,,,,2.12,
-PET_RWTC_W,"Cushing, OK WTI Spot Price FOB, Weekly",,,,,,,,,,,,,,,,,0.47
-PET_RBRTE_W,"Europe Brent Spot Price FOB, Weekly",,,,,,,,,,,,,,,,,22.17%
+PET_WCESTUS1_W,"U.S. Ending Stocks excluding SPR of Crude Oil, Weekly",,,,,,,,,,,,,,,,,
+PET_WBCSTUS1_W,"U.S. Ending Stocks of Gasoline Blending Components, Weekly",,,,,,,,,,,,,,,,,
+PET_RWTC_W,"Cushing, OK WTI Spot Price FOB, Weekly",,,,,,,,,,,,,,,,,
+PET_RBRTE_W,"Europe Brent Spot Price FOB, Weekly",,,,,,,,,,,,,,,,,
 PET_EER_EPMRR_PF4_Y05LA_DPG_W,"Los Angeles Reformulated RBOB Regular Gasoline Spot Price, Weekly",,,,,,,,,,,,,,,,,
 PET_EER_EPD2F_PF4_Y35NY_DPG_W,"New York Harbor No. 2 Heating Oil Spot Price FOB, Weekly",,,,,,,,,,,,,,,,,
