@@ -28,6 +28,8 @@ library(quantmod)
 library(ggcorrplot)
 library(tidyquant)
 library(timetk)
+library(tidyverse)
+library(tibbletime)
 
 #####################################################################
 ######################### EDA #######################################
@@ -403,36 +405,36 @@ commodity.long %>%
 
 getRetVsT(commodites$ve$logReturn, 1:6)
 
-# convert to monthly prices.
-
-commodites.monthly <- commodity.wide %>%
-  tk_xts(date_var = date) %>%
-  to.monthly(indexAt = "lastof",
-             OHLC = F)
-
 commodity.long %>%
   ggplot(aes(x = Return, y = ..density..)) +
-  geom_density(aes(color = Symbol), alpha = 1) +
-  geom_histogram(aes(fill = Symbol), alpha = 0.45, binwidth = 0.01) +
+  geom_density( alpha = 1) +
+  geom_histogram(aes(fill = Description), alpha = 0.45, binwidth = 0.01) +
   facet_wrap(~Symbol) +
   ggtitle("Monthly Returns Density Since 2013") +
   xlab("monthly returns") +
   ylab("distribution") +
   theme_update(plot.title = element_text(hjust = 0.5))
 
-commodites.monthly %>%
-  ggplot(aes(x = Return, fill = Description)) +
-  geom_histogram(aes(y = ..density..),alpha = 0.45, binwidth = 0.005) +
-  ggtitle("Monthly Returns Since 2014") +
-  theme_update(plot.title = element_text(hjust = 0.5))
+# rolling sd
 
-# Verfiy Import
-head(commodites.monthly, 3)
+window <- 10
 
-crude.long <-
-  commodity.wide %>%
-  tq_portfolio(assets_col = Symbol,
-               returns_col = Return,
-               col_rename = "returns",
-               rebalance_on = "months")
+# rolling sd, tidyverse
+sd_roll_10 <- rollify(sd, window = window)
+
+commodity.rolling.sd <- 
+  commodity.long %>%
+  as_tbl_time(index = Date) %>%
+  mutate(rolling_sd = sd_roll_10(Return)) %>%
+  select(-Return) %>%
+  na.omit()
+
+commodity.rolling.sd[commodity.rolling.sd$Symbol != "VE",] %>%
+  ggplot(aes(x = Date)) +
+  geom_line(aes(y = rolling_sd, color = Description)) +
+  facet_wrap(aes(Description)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_date(breaks = pretty_breaks(n = 8)) +
+  labs(title = "Rolling Volatility - 10 day", y = "") +
+  theme(plot.title = element_text(hjust = 0.5))
 
