@@ -30,6 +30,7 @@ library(tidyquant)
 library(timetk)
 library(tidyverse)
 library(tibbletime)
+library(forecast)
 
 #####################################################################
 ######################### EDA #######################################
@@ -438,3 +439,180 @@ commodity.rolling.sd[commodity.rolling.sd$Symbol != "VE",] %>%
   labs(title = "Rolling Volatility - 10 day", y = "") +
   theme(plot.title = element_text(hjust = 0.5))
 
+#####################
+#### TS ACF
+####################
+
+ggAcf(ts(commodites$sc$logReturn, frequency = 365)) +
+  ggtitle("Series: WTI")
+
+ggAcf(ts(commodites$ng$logReturn, frequency = 365)) +
+  ggtitle("Series: Natural Gas")
+
+ggAcf(ts(commodites$ng$logReturn, frequency = 365)) +
+  ggtitle("Series: Natural Gas")
+
+############
+### TS Correlations
+###########
+
+ggAcf(brent) + 
+  ggtitle("Series: Brent Crude")
+
+ggAcf(wti) +
+  ggtitle("Series: WTI")
+
+ggAcf(commodites$sc$logReturn) +
+  ggtitle("Series: WTI")
+
+ggAcf(commodity.wide[, .(sc, cl)]) +
+  ggtitle("WTI vs Brent ACF")
+
+ggAcf(commodity.wide[, .(cl, mt)]) +
+  ggtitle("WTI vs Gulf Sour ACF")
+
+############
+### TS Correlations
+###########
+
+# Brent Crude
+cl.train.data <- commodity.long[Symbol == "CL" & Date < "2019-1-1"]
+cl.test.data <- commodity.long[Symbol == "CL" & Date >= "2019-1-1"]
+
+ggAcf(cl.train.data$Return)
+ggAcf(cl.train.data$Return)$data
+
+cl.train.model <- auto.arima(cl.train.data$Return, ic = "bic")
+
+cl.test.model <- Arima(cl.test.data$Return, model = cl.train.model)
+
+cl.forecasts = fitted(cl.test.model)
+
+plot(forecast(cl.test.model, h = 4))
+
+
+# WTI
+
+sc.baseline <- as.data.table(commodites[["sc"]])
+sc.baseline[, 
+            Date := nymex_date][, 
+                                nymex_date := NULL]
+
+Box.test(sc.baseline$return, lag = 4, type = "Ljung-Box")
+
+ggAcf(sc.train.data$return) +
+  ggtitle("WTI Autocorrelation")
+
+ggAcf(sc.train.data$return)$data
+
+sc.train.data <- sc.baseline[Date < "2019-1-1"]
+sc.test.data <- sc.baseline[Date >= "2019-1-1"]
+
+sc.train.model <- auto.arima(sc.train.data$return, ic = "bic")
+
+sc.test.model <- Arima(sc.test.data$return, model = sc.train.model)
+
+sc.test.data$pred <- fitted(sc.test.model)
+
+ggplot(sc.test.data, aes(x = Date)) +
+  geom_line(aes(y = return), lwd = .5, col = "black") +
+  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
+  geom_hline(aes(yintercept = .015), col = "green", lwd = .8, alpha = .7) +
+  geom_hline(aes(yintercept = -.02), col = "red", lwd = .8, alpha = .7) +
+  labs(title = "WTI Actual vs. Pred", y = "Return")
+
+monthly <- sc.test.data[Date >= "2019-1-1" & Date < "2019-2-1"]
+
+ggplot(monthly, aes(x = Date)) +
+  geom_line(aes(y = return), lwd = .5, col = "black") +
+  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
+  labs(title = "WTI Actual vs. Pred", y = "Return")
+
+threshold <- 0.015
+
+sc.test.data[, index := .I]
+
+sc.enter <- sc.test.data[pred < -threshold | pred > threshold]
+sc.enter$exit <- sc.enter$index + 4
+sc.enter$side <- ifelse(as.numeric(sc.enter$pred) >= 0, "buy", "sell")
+
+sc.exit <- sc.test.data[index %in% sc.enter$exit]
+sc.exit$exit <- 0
+sc.exit$side <- ifelse(sc.enter$side == "buy", "sell", "buy")
+
+sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
+
+sc.transactions
+
+write.csv(sc.transactions, file = "sc.trades.csv")
+
+sc.disp.trans <- merge(sc.test.data, sc.transactions, by = c("Date"), all.x = T)
+sc.disp.trans$color <- ifelse(sc.disp.trans$side == "buy", "green", ifelse(sc.disp.trans$side == "sell", "red", NA))
+
+sc.disp.trans$spotPrice.y[is.na(sc.disp.trans$spotPrice.y)] <- NA # sc.disp.trans[is.na(sc.disp.trans$spotPrice.y)]$spotPrice.x
+
+head(sc.disp.trans, 10)
+
+ggplot(sc.test.data[Date < "2019-2-1"]) +
+  geom_line(aes(x = Date, y = close), lwd = 1, col = "black") +
+  geom_point(data = sc.disp.trans[Date < "2019-2-1"], aes(x = Date, y = spotPrice.y, col = color), lwd = 5) +
+  labs(title = "WTI Actual vs. Pred", y = "Return")
+
+symbol <- "sc"
+start_date <- "2019-1-1"
+
+candlestick(symbol, start_date, commodites)
+
+candlestickPred <- function(data, symbol) {
+  
+  d <- data
+  
+  desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
+  
+  start_date <- as.Date(min(d$Date))
+  end_date <- as.Date(max(d$Date))
+  
+  p <- d %>% 
+    plot_ly(x = ~Date, type = "candlestick",
+            open = ~open, close = ~spotPrice.x,
+            high = ~high, low = ~low) %>%
+    add_paths(x = ~Date, y = ~spotPrice.y, line = list(color = "black", width = 3), inherit = F) %>%
+    layout(title = paste(symbol, "activity since", format(start_date, "%b %d %Y")))
+  
+  v <- d %>% 
+    plot_ly(x = ~Date, y = ~volume, type='bar', name = "Volume",
+            colors = c('#17BECF','#7F7F7F'))
+  
+  rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+             xanchor = 'center', yref = 'paper',
+             font = list(size = 9),
+             buttons = list(
+               list(count=1,
+                    label='RESET',
+                    step='all'),
+               list(count=1,
+                    label='1 YR',
+                    step='year',
+                    stepmode='backward'),
+               list(count=3,
+                    label='3 MO',
+                    step='month',
+                    stepmode='backward'),
+               list(count=1,
+                    label='1 MO',
+                    step='month',
+                    stepmode='backward')
+             ))
+  
+  pp <- subplot(p, v, heights = c(0.7,0.2), nrows=2,
+                shareX = TRUE, titleY = TRUE) %>%
+    layout(title = paste( desc, " : ", format(start_date, "%b %d %Y"), "-", format(end_date, "%b %d %Y")),
+           xaxis = list(rangeselector = rs),
+           legend = list(orientation = 'h', x = 0.5, y = 1,
+                         xanchor = 'center', yref = 'paper',
+                         font = list(size = 10),
+                         bgcolor = 'transparent'))
+  pp
+}
+
+candlestickPred(sc.disp.trans, "WTI")
