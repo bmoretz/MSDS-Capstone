@@ -579,6 +579,8 @@ candlestick(symbol, start_date, commodites)
 dates <- sc.test.data$Date
 positions <- sc.positions
 
+write.csv(positions, file = "sc.positions.csv")
+
 holdings <- list()
 for( index in 1:nrow(positions) ) {
   
@@ -588,7 +590,7 @@ for( index in 1:nrow(positions) ) {
   
   open.dates <- holding[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
   
-  holding[Date %in% open.dates]$Price <- pos$ExitPrice
+  holding[Date %in% open.dates]$Price <- pos$EnterPrice
   #holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
   holding$Direction <- pos$Direction
   holding$PnL <- pos$ProfitLoss
