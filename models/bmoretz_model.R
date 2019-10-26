@@ -274,7 +274,6 @@ getRetNormQuantiles(rnorm(2000), desc = "RNORM (baseline)") # for reference
 
 getCorr(commodites)
 
-
 #### RB
 
 plotReturns("rb", commodites)
@@ -283,7 +282,7 @@ rb.ret <- commodites$rb$logReturn
 
 getRetVsT(rb.ret) # t-distribution, df = 6
 
-getRetDensityVsNorm(rb.ret) # strogest fit: median / mad
+getRetDensityVsNorm(rb.ret) # strongest fit: median / mad
 
 getRetNormQuantiles(rb.ret, desc = "RO")
 
@@ -528,19 +527,32 @@ ggplot(monthly, aes(x = Date)) +
   geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
   labs(title = "WTI Actual vs. Pred", y = "Return")
 
-threshold <- 0.015
+threshold <- 0.01
 
 sc.test.data[, index := .I]
 
 sc.enter <- sc.test.data[pred < -threshold | pred > threshold]
 sc.enter$exit <- sc.enter$index + 4
-sc.enter$side <- ifelse(as.numeric(sc.enter$pred) >= 0, "buy", "sell")
+sc.enter$side <- ifelse(as.numeric(sc.enter$pred) >= 0, "sell", "buy")
 
 sc.exit <- sc.test.data[index %in% sc.enter$exit]
 sc.exit$exit <- 0
 sc.exit$side <- ifelse(sc.enter$side == "buy", "sell", "buy")
 
-sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
+# Convert Transactions to Positions
+
+sc.transactions <- merge(sc.enter, sc.exit, by.x = c("exit"), by.y = c("index"))
+sc.positions <- sc.transactions[, .(Position = .I,
+                                    Direction = ifelse(side.x == "buy", "Long", "Short"),
+                                    EnterDate = Date.x,
+                                    EnterPrice = spotPrice.x, 
+                                    ExitDate = Date.y,
+                                    ExitPrice = spotPrice.y)]
+sc.positions[, ProfitLoss := ifelse(Direction == "Long", ExitPrice - EnterPrice, EnterPrice - ExitPrice)]
+
+sum(sc.positions$ProfitLoss)
+
+# sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
 
 sc.transactions
 
@@ -549,13 +561,13 @@ write.csv(sc.transactions, file = "sc.trades.csv")
 sc.disp.trans <- merge(sc.test.data, sc.transactions, by = c("Date"), all.x = T)
 sc.disp.trans$color <- ifelse(sc.disp.trans$side == "buy", "green", ifelse(sc.disp.trans$side == "sell", "red", NA))
 
-sc.disp.trans$spotPrice.y[is.na(sc.disp.trans$spotPrice.y)] <- NA # sc.disp.trans[is.na(sc.disp.trans$spotPrice.y)]$spotPrice.x
+sc.disp.trans$spotPrice.y[is.na(sc.disp.trans$spotPrice.y)] <- NA
 
 head(sc.disp.trans, 10)
 
 ggplot(sc.test.data[Date < "2019-2-1"]) +
   geom_line(aes(x = Date, y = close), lwd = 1, col = "black") +
-  geom_point(data = sc.disp.trans[Date < "2019-2-1"], aes(x = Date, y = spotPrice.y, col = color), lwd = 5) +
+  geom_point(data = sc.disp.trans[Date < "2019-2-1"], aes(x = Date, y = spotPrice.y, col = side), lwd = 5) +
   labs(title = "WTI Actual vs. Pred", y = "Return") +
   theme(legend.position = "none")
 
@@ -564,56 +576,92 @@ start_date <- "2019-1-1"
 
 candlestick(symbol, start_date, commodites)
 
-candlestickPred <- function(data, symbol) {
+dates <- sc.test.data$Date
+positions <- sc.positions
+
+write.csv(positions, file = "sc.positions.csv")
+
+holdings <- list()
+for( index in 1:nrow(positions) ) {
   
-  d <- data
+  pos <- positions[index,]
   
-  desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
+  holding <- data.table( Date = dates, Price = 0 )
   
-  start_date <- as.Date(min(d$Date))
-  end_date <- as.Date(max(d$Date))
+  open.dates <- holding[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
   
-  p <- d %>% 
-    plot_ly(x = ~Date, type = "candlestick",
-            open = ~open, close = ~spotPrice.x,
-            high = ~high, low = ~low) %>%
-    add_paths(x = ~Date, y = ~spotPrice.y, line = list(color = "black", width = 3), inherit = F) %>%
-    layout(title = paste(symbol, "activity since", format(start_date, "%b %d %Y")))
-  
-  v <- d %>% 
-    plot_ly(x = ~Date, y = ~volume, type='bar', name = "Volume",
-            colors = c('#17BECF','#7F7F7F'))
-  
-  rs <- list(visible = TRUE, x = 0.5, y = -0.055,
-             xanchor = 'center', yref = 'paper',
-             font = list(size = 9),
-             buttons = list(
-               list(count=1,
-                    label='RESET',
-                    step='all'),
-               list(count=1,
-                    label='1 YR',
-                    step='year',
-                    stepmode='backward'),
-               list(count=3,
-                    label='3 MO',
-                    step='month',
-                    stepmode='backward'),
-               list(count=1,
-                    label='1 MO',
-                    step='month',
-                    stepmode='backward')
-             ))
-  
-  pp <- subplot(p, v, heights = c(0.7,0.2), nrows=2,
-                shareX = TRUE, titleY = TRUE) %>%
-    layout(title = paste( desc, " : ", format(start_date, "%b %d %Y"), "-", format(end_date, "%b %d %Y")),
-           xaxis = list(rangeselector = rs),
-           legend = list(orientation = 'h', x = 0.5, y = 1,
-                         xanchor = 'center', yref = 'paper',
-                         font = list(size = 10),
-                         bgcolor = 'transparent'))
-  pp
+  holding[Date %in% open.dates]$Price <- pos$EnterPrice
+  #holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
+  holding$Direction <- pos$Direction
+  holding$PnL <- pos$ProfitLoss
+  holding[Price == 0]$Price <- NA
+  holdings[[index]] <- holding
 }
 
-candlestickPred(sc.disp.trans, "WTI")
+holdings[1]
+
+# candlestickPred <- function(data, symbol) {
+symbol <- "sc"
+data <- sc.test.data
+
+h <- sc.positions
+d <- data
+
+desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
+
+start_date <- as.Date(min(d$Date))
+end_date <- as.Date(max(d$Date))
+
+p <- d %>% 
+  plot_ly(x = ~Date, type = "candlestick",
+          open = ~open, close = ~spotPrice,
+          high = ~high, low = ~low)
+
+for(i in 1:length(holdings)){
+  h <- holdings[[i]]
+  
+  p <- add_lines(p, x = h$Date, y = h$Price,
+                 linetype = h$Direction,
+                 line = list(color = ifelse(h[1]$PnL >= 0, "darkgreen", "darkred"), width = 2), 
+                 text = paste("Profit / Loss: ", round(h[1]$PnL, 2)), 
+                 inheret = F)
+}
+
+p
+
+rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+           xanchor = 'center', yref = 'paper',
+           font = list(size = 9),
+           buttons = list(
+             list(count=1,
+                  label='RESET',
+                  step='all'),
+             list(count=1,
+                  label='1 YR',
+                  step='year',
+                  stepmode='backward'),
+             list(count=3,
+                  label='3 MO',
+                  step='month',
+                  stepmode='backward'),
+             list(count=1,
+                  label='1 MO',
+                  step='month',
+                  stepmode='backward')
+           ))
+
+pp <- subplot(p, heights = c(1), nrows=1,
+              shareX = TRUE, titleY = TRUE) %>%
+  layout(title = paste( desc, " - Mean Revision Strategy Trading : ", format(start_date, "%b %d %Y"), "-", format(end_date, "%b %d %Y"), "Net PnL: $", sum(positions$ProfitLoss)),
+         xaxis = list(rangeselector = rs),
+         legend = list(orientation = 'h', x = 0.5, y = 1,
+                       xanchor = 'center', yref = 'paper',
+                       font = list(size = 10),
+                       bgcolor = 'transparent'))
+pp
+
+
+
+# }
+
+# candlestickPred(sc.disp.trans, "WTI")
