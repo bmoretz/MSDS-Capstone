@@ -78,7 +78,7 @@ getDataForSymbol <- function( symbol, data = data.energy ) {
   
   data.symbol <- data.symbol[complete.cases(data.symbol),]
   data.symbol$spotPrice <- data.symbol[["close"]]
-
+  
   # calculate returns from prices
   prices <- data.symbol$spotPrice
   n <- length(prices)
@@ -189,7 +189,7 @@ getCorr <- function( data = commodites ) {
 }
 
 candlestick <- function(symbol, start_date = "2019-1-1", data = commodites ) {
-
+  
   desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
   
   d <- data[[symbol]][data[[symbol]]$nymex_date >= start_date,]
@@ -226,7 +226,7 @@ candlestick <- function(symbol, start_date = "2019-1-1", data = commodites ) {
              ))
   
   pp <- subplot(p, v, heights = c(0.7,0.2), nrows=2,
-               shareX = TRUE, titleY = TRUE) %>%
+                shareX = TRUE, titleY = TRUE) %>%
     layout(title = paste( desc, " : ", format(as.Date(start_date), "%b %d %Y"), "-", format(as.Date(max(d$nymex_date)), "%b %d %Y")),
            xaxis = list(rangeselector = rs),
            legend = list(orientation = 'h', x = 0.5, y = 1,
@@ -382,8 +382,8 @@ ggplot(crude.dt, aes(x = cl, y = mt)) +
 ## Dist of Returns
 
 commodity.long <- melt(commodity.wide, id.var = c("Date"),
-                   variable.name = "Symbol",
-                   value.name = "Return")
+                       variable.name = "Symbol",
+                       value.name = "Return")
 commodity.long$Symbol <- toupper(commodity.long$Symbol)
 
 data.symbology <- data.symbology[, 1:2]
@@ -549,8 +549,14 @@ sc.positions <- sc.transactions[, .(Position = .I,
                                     ExitDate = Date.y,
                                     ExitPrice = spotPrice.y)]
 sc.positions[, ProfitLoss := ifelse(Direction == "Long", ExitPrice - EnterPrice, EnterPrice - ExitPrice)]
+sc.positions[, Return := ifelse(Direction == "Long", (ExitPrice - EnterPrice)/ExitPrice, (EnterPrice - ExitPrice)/EnterPrice)]
 
 sum(sc.positions$ProfitLoss)
+
+sc.return <- merge(sc.test.data, sc.positions, by.x = c("Date"), by.y = c("EnterDate"), all.x = T)
+sc.return[is.na(sc.return$Return)] <- 0
+
+(cumprod(1 + sc.return$Return) - 1)[nrow(sc.test.data)] * 100
 
 # sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
 
@@ -599,6 +605,8 @@ for( index in 1:nrow(positions) ) {
 }
 
 holdings[1]
+
+positions
 
 # candlestickPred <- function(data, symbol) {
 symbol <- "sc"
