@@ -31,6 +31,8 @@ library(timetk)
 library(tidyverse)
 library(tibbletime)
 library(forecast)
+library(rugarch)
+library(xts)
 
 #####################################################################
 ######################### EDA #######################################
@@ -249,6 +251,85 @@ getCorTable <- function( values ) {
               ))
 }
 
+getHoldingsFromPositions <- function( positions ) {
+  holdings <- list()
+  for( index in 1:nrow(positions) ) {
+    
+    pos <- positions[index,]
+    
+    holding <- data.table( Date = dates, Price = 0 )
+    
+    open.dates <- holding[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
+    
+    holding[Date %in% open.dates]$Price <- pos$EnterPrice
+    #holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
+    holding$Direction <- pos$Direction
+    holding$PnL <- pos$ProfitLoss
+    holding[Price == 0]$Price <- NA
+    holdings[[index]] <- holding
+  }
+  
+  holdings
+}
+
+candlestickHoldings <- function( symbol, holdings, data, return ) {
+  
+  desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
+  
+  print(desc)
+  
+  start_date <- as.Date(min(data$Date))
+  end_date <- as.Date(max(data$Date))
+  
+  p <- data %>% 
+    plot_ly(x = ~Date, type = "candlestick",
+            open = ~open, close = ~spotPrice,
+            high = ~high, low = ~low)
+  
+  for(i in 1:length(holdings)){
+    h <- holdings[[i]]
+    
+    p <- add_lines(p, x = h$Date, y = h$Price,
+                   linetype = h$Direction,
+                   line = list(color = ifelse(h[1]$PnL >= 0, "darkgreen", "darkred"), width = 2), 
+                   text = paste("Profit / Loss: ", round(h[1]$PnL, 2)), 
+                   inheret = F)
+  }
+  
+  p
+  
+  rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+             xanchor = 'center', yref = 'paper',
+             font = list(size = 9),
+             buttons = list(
+               list(count=1,
+                    label='RESET',
+                    step='all'),
+               list(count=1,
+                    label='1 YR',
+                    step='year',
+                    stepmode='backward'),
+               list(count=3,
+                    label='3 MO',
+                    step='month',
+                    stepmode='backward'),
+               list(count=1,
+                    label='1 MO',
+                    step='month',
+                    stepmode='backward')
+             ))
+  
+  pp <- subplot(p, heights = c(1), nrows=1,
+                shareX = TRUE, titleY = TRUE) %>%
+    layout(title = paste( desc, " - Mean Revision Strategy Trading : ", format(start_date, "%b %d %Y"), "-", format(end_date, "%b %d %Y"), " Net Return : ", round(return, 2), "%"),
+           xaxis = list(rangeselector = rs),
+           legend = list(orientation = 'h', x = 0.5, y = 1,
+                         xanchor = 'center', yref = 'paper',
+                         font = list(size = 10),
+                         bgcolor = 'transparent'))
+  pp
+}
+
 ###############################################################
 # Indexes
 ##############################################################
@@ -389,6 +470,8 @@ commodity.long$Symbol <- toupper(commodity.long$Symbol)
 data.symbology <- data.symbology[, 1:2]
 commodity.long <- merge(commodity.long, data.symbology, on = c("Symbol"))
 
+commodity.long <- commodity.long[, .(Date, Return, Symbol, Description)]
+
 commodity.long %>%
   ggplot(aes(x = Return, fill = Description)) +
   #geom_histogram(aes(y = ..density..),alpha = 0.45, binwidth = 0.005) +
@@ -474,22 +557,6 @@ ggAcf(commodity.wide[, .(cl, mt)]) +
 ### TS Models
 ###########
 
-# Brent Crude
-cl.train.data <- commodity.long[Symbol == "CL" & Date < "2019-1-1"]
-cl.test.data <- commodity.long[Symbol == "CL" & Date >= "2019-1-1"]
-
-ggAcf(cl.train.data$Return)
-ggAcf(cl.train.data$Return)$data
-
-cl.train.model <- auto.arima(cl.train.data$Return, ic = "bic")
-
-cl.test.model <- Arima(cl.test.data$Return, model = cl.train.model)
-
-cl.forecasts = fitted(cl.test.model)
-
-plot(forecast(cl.test.model, h = 4))
-
-
 # WTI
 
 sc.baseline <- as.data.table(commodites[["sc"]])
@@ -556,7 +623,8 @@ sum(sc.positions$ProfitLoss)
 sc.return <- merge(sc.test.data, sc.positions, by.x = c("Date"), by.y = c("EnterDate"), all.x = T)
 sc.return[is.na(sc.return$Return)] <- 0
 
-(cumprod(1 + sc.return$Return) - 1)[nrow(sc.test.data)] * 100
+sc.return <- (cumprod(1 + sc.return$Return) - 1)[nrow(sc.test.data)] * 100
+sc.return <- ( sc.return ^ 1/9 ) * 12
 
 # sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
 
@@ -583,93 +651,193 @@ start_date <- "2019-1-1"
 candlestick(symbol, start_date, commodites)
 
 dates <- sc.test.data$Date
-positions <- sc.positions
+sc.holdings <- getHoldingsFromPositions(sc.positions)
 
-write.csv(positions, file = "sc.positions.csv")
+write.csv(sc.holdings, file = "sc.positions.csv")
 
-holdings <- list()
-for( index in 1:nrow(positions) ) {
+candlestickHoldings("cl", sc.holdings, sc.test.data, sc.return )
+
+# Brent Crude
+
+cl.baseline <- as.data.table(commodites[["cl"]])
+cl.baseline[, 
+            Date := nymex_date][, 
+                                nymex_date := NULL]
+
+symbol <- "cl"
+start_date <- "2014-1-1"
+
+candlestick(symbol, start_date, commodites)
+
+Box.test(cl.baseline$return, lag = 15, type = "Ljung-Box")
+
+ggAcf(cl.train.data$return) +
+  ggtitle("Brent Autocorrelation")
+
+ggAcf(cl.train.data$return)$data
+
+cl.train.data <- cl.baseline[Date < "2019-1-1"]
+cl.test.data <- cl.baseline[Date >= "2019-1-1"]
+
+plot.ts(cl.train.data)
+
+ggplot(crude.wide, aes(x = Date)) +
+  geom_line(aes(y = cl), lwd = .8, col = "cornflowerblue") +
+  labs(title = "Brent", y = "Return")
+
+ggAcf(cl.train.data$Return)
+ggAcf(cl.train.data$Return)$data
+
+cl.train.model <- auto.arima(cl.train.data$return, max.p = 10, max.q = 10, d = 1, ic = "bic")
+
+cl.test.model <- Arima(cl.test.data$return, model = cl.train.model)
+
+cl.test.data$pred <- fitted(cl.test.model)
+
+cl.threshold <- 0.02
+
+ggplot(cl.test.data, aes(x = Date)) +
+  geom_line(aes(y = return), lwd = .5, col = "black") +
+  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
+  geom_hline(aes(yintercept = cl.threshold), col = "green", lwd = .8, alpha = .7) +
+  geom_hline(aes(yintercept = -cl.threshold), col = "red", lwd = .7, alpha = .7) +
+  labs(title = "Brent Actual vs. Pred", y = "Return")
+
+monthly <- cl.test.data[Date >= "2019-1-1" & Date < "2019-2-1"]
+
+ggplot(monthly, aes(x = Date)) +
+  geom_line(aes(y = return), lwd = .5, col = "black") +
+  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
+  labs(title = "WTI Actual vs. Pred", y = "Return")
+
+cl.test.data[, index := .I]
+
+cl.enter <- cl.test.data[pred < -threshold | pred > threshold]
+cl.enter$exit <- cl.enter$index + 1
+cl.enter$side <- ifelse(as.numeric(cl.enter$pred) >= 0, "sell", "buy")
+
+cl.exit <- cl.test.data[index %in% cl.enter$exit]
+cl.exit$exit <- 0
+cl.exit$side <- ifelse(cl.enter$side == "buy", "sell", "buy")
+
+# Convert Transactions to Positions
+
+cl.transactions <- merge(cl.enter, cl.exit, by.x = c("exit"), by.y = c("index"))
+cl.positions <- cl.transactions[, .(Position = .I,
+                                    Direction = ifelse(side.x == "buy", "Long", "Short"),
+                                    EnterDate = Date.x,
+                                    EnterPrice = spotPrice.x, 
+                                    ExitDate = Date.y,
+                                    ExitPrice = spotPrice.y)]
+cl.positions[, ProfitLoss := ifelse(Direction == "Long", ExitPrice - EnterPrice, EnterPrice - ExitPrice)]
+cl.positions[, Return := ifelse(Direction == "Long", (ExitPrice - EnterPrice)/ExitPrice, (EnterPrice - ExitPrice)/EnterPrice)]
+
+sum(cl.positions$ProfitLoss)
+
+cl.return <- merge(cl.test.data, cl.positions, by.x = c("Date"), by.y = c("EnterDate"), all.x = T)
+cl.return[is.na(cl.return$Return)]$Return <- 0
+cl.return <- (cumprod(1 + cl.return$Return) - 1)[nrow(cl.test.data)] * 100
+
+cl.return <- ( cl.return ^ 1/9 ) * 12
+
+write.csv(cl.transactions, file = "cl.trades.csv")
+
+cl.disp.trans <- merge(cl.test.data, cl.transactions, by = c("Date"), all.x = T)
+cl.disp.trans$color <- ifelse(cl.disp.trans$side == "buy", "green", ifelse(cl.disp.trans$side == "sell", "red", NA))
+
+cl.disp.trans$spotPrice.y[is.na(cl.disp.trans$spotPrice.y)] <- NA
+
+head(cl.disp.trans, 10)
+
+ggplot(cl.test.data[Date < "2019-2-1"]) +
+  geom_line(aes(x = Date, y = close), lwd = 1, col = "black") +
+  geom_point(data = cl.disp.trans[Date < "2019-2-1"], aes(x = Date, y = spotPrice.y, col = side), lwd = 5) +
+  labs(title = "WTI Actual vs. Pred", y = "Return") +
+  theme(legend.position = "none")
+
+
+getHoldingsFromPositions <- function( positions ) {
+  holdings <- list()
+  for( index in 1:nrow(positions) ) {
+    
+    pos <- positions[index,]
+
+    holding <- data.table( Date = dates, Price = 0 )
+    
+    open.dates <- pos[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
+    
+    print(open.dates)
+    
+    holding[Date %in% open.dates]$Price <- pos$EnterPrice
+    holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
+    holding$Direction <- pos$Direction
+    holding$PnL <- pos$ProfitLoss
+    holding[Price == 0]$Price <- NA
+    
+    holdings[[index]] <- holding
+  }
   
-  pos <- positions[index,]
-  
-  holding <- data.table( Date = dates, Price = 0 )
-  
-  open.dates <- holding[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
-  
-  holding[Date %in% open.dates]$Price <- pos$EnterPrice
-  #holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
-  holding$Direction <- pos$Direction
-  holding$PnL <- pos$ProfitLoss
-  holding[Price == 0]$Price <- NA
-  holdings[[index]] <- holding
+  holdings
 }
 
-holdings[1]
-
-positions
-
-# candlestickPred <- function(data, symbol) {
-symbol <- "sc"
-data <- sc.test.data
-
-h <- sc.positions
-d <- data
-
-desc <- data.symbology[data.symbology$Symbol == toupper(symbol),]$Description
-
-start_date <- as.Date(min(d$Date))
-end_date <- as.Date(max(d$Date))
-
-p <- d %>% 
-  plot_ly(x = ~Date, type = "candlestick",
-          open = ~open, close = ~spotPrice,
-          high = ~high, low = ~low)
-
-for(i in 1:length(holdings)){
-  h <- holdings[[i]]
-  
-  p <- add_lines(p, x = h$Date, y = h$Price,
-                 linetype = h$Direction,
-                 line = list(color = ifelse(h[1]$PnL >= 0, "darkgreen", "darkred"), width = 2), 
-                 text = paste("Profit / Loss: ", round(h[1]$PnL, 2)), 
-                 inheret = F)
-}
-
-p
-
-rs <- list(visible = TRUE, x = 0.5, y = -0.055,
-           xanchor = 'center', yref = 'paper',
-           font = list(size = 9),
-           buttons = list(
-             list(count=1,
-                  label='RESET',
-                  step='all'),
-             list(count=1,
-                  label='1 YR',
-                  step='year',
-                  stepmode='backward'),
-             list(count=3,
-                  label='3 MO',
-                  step='month',
-                  stepmode='backward'),
-             list(count=1,
-                  label='1 MO',
-                  step='month',
-                  stepmode='backward')
-           ))
-
-pp <- subplot(p, heights = c(1), nrows=1,
-              shareX = TRUE, titleY = TRUE) %>%
-  layout(title = paste( desc, " - Mean Revision Strategy Trading : ", format(start_date, "%b %d %Y"), "-", format(end_date, "%b %d %Y"), "Net PnL: $", sum(positions$ProfitLoss)),
-         xaxis = list(rangeselector = rs),
-         legend = list(orientation = 'h', x = 0.5, y = 1,
-                       xanchor = 'center', yref = 'paper',
-                       font = list(size = 10),
-                       bgcolor = 'transparent'))
-pp
+cl.holdings <- getHoldingsFromPositions(cl.positions)
 
 
+write.csv(cl.holdings, file = "cl.positions.csv")
 
-# }
+candlestickHoldings("sc", cl.holdings, cl.test.data, cl.return )
 
-# candlestickPred(sc.disp.trans, "WTI")
+
+# CL GARCH
+
+par(mfrow=c(1,1))
+plot(forecast(sc.test.model, h = 10))
+
+arma.garch.norm = ugarchspec(mean.model=list(armaOrder=c(1,0)),
+                             variance.model=list(garchOrder=c(1,1)))
+
+sc.xts <- as.xts.data.table(cl.train.data)
+
+sc.garch.norm = ugarchfit(data=cl.xts, spec=arma.garch.norm)
+
+show(cl.garch.norm)
+
+e = residuals(cl.garch.norm, standardize=TRUE)
+
+fitdistr(e,"t")
+
+cl.arma.garch.t = ugarchspec(mean.model=list(armaOrder=c(1,0)),
+                             variance.model=list(garchOrder=c(1,1)),
+                             distribution.model = "std")
+
+cl.garch.t = ugarchfit(data=sc.xts, spec=arma.garch.t)
+
+show(cl.garch.t)
+
+plot(cl.garch.t)
+
+par(mfrow = c(3,2))
+for(i in c(1, 2, 5, 6, 7, 13)) plot(cl.garch.t, which=i)
+
+par(mfrow=c(1,1))
+plot(cl.garch.t, which=1)
+
+par(mfrow=c(2,1))
+plot(cl.garch.t, which=3)
+plot(cl.garch.t, which=2)
+
+par(mfrow=c(2,1))
+plot(cl.garch.t, which=4)
+plot(cl.garch.t, which=8)
+
+par(mfrow = c(3,2))
+for(i in c(1,3,10,11,8,9)) plot(cl.garch.t, which=i)
+
+cl.garch.norm = ugarchfit(data=cl.train.data, spec=garch.norm)
+par(mfrow=c(1,1))
+pred1 = ugarchforecast(cl.garch.norm, data = cl.train.data, n.ahead = 50)
+plot(pred1, which = 1)
+
+head(fitted(pred1))
+head(sigma(pred1))
+
