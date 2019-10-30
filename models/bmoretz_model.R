@@ -664,7 +664,7 @@ cl.baseline[,
             Date := nymex_date][, 
                                 nymex_date := NULL]
 
-symbol <- "cl"
+symbol <- "sc"
 start_date <- "2014-1-1"
 
 candlestick(symbol, start_date, commodites)
@@ -761,7 +761,7 @@ getHoldingsFromPositions <- function( positions ) {
   for( index in 1:nrow(positions) ) {
     
     pos <- positions[index,]
-
+    
     holding <- data.table( Date = dates, Price = 0 )
     
     open.dates <- pos[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
@@ -779,6 +779,8 @@ getHoldingsFromPositions <- function( positions ) {
   
   holdings
 }
+
+write.csv(cl.positions, file = "cl.positions.csv")
 
 cl.holdings <- getHoldingsFromPositions(cl.positions)
 
