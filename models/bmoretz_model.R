@@ -624,9 +624,15 @@ sc.return <- merge(sc.test.data, sc.positions, by.x = c("Date"), by.y = c("Enter
 sc.return[is.na(sc.return$Return)] <- 0
 
 sc.return <- (cumprod(1 + sc.return$Return) - 1)[nrow(sc.test.data)] * 100
-sc.return <- ( sc.return ^ 1/9 ) * 12
+sc.return <- ( sc.return ^ 1/12) * 12
 
-# sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
+sc.ret <- (cumprod(1 + sc.test.data$return) - 1)[nrow(sc.test.data)] * 100
+
+write.csv(sc.test.data, file = "sc.return.csv")
+
+write.csv(sc.transactions, file = "sc.return.csv")
+
+sc.transactions <- rbind(sc.enter, sc.exit)[ order(Date)][, .(Date, spotPrice, side)]
 
 sc.transactions
 
@@ -638,6 +644,8 @@ sc.disp.trans$color <- ifelse(sc.disp.trans$side == "buy", "green", ifelse(sc.di
 sc.disp.trans$spotPrice.y[is.na(sc.disp.trans$spotPrice.y)] <- NA
 
 head(sc.disp.trans, 10)
+
+sc.test.data[, return := (open - close)/close]
 
 ggplot(sc.test.data[Date < "2019-2-1"]) +
   geom_line(aes(x = Date, y = close), lwd = 1, col = "black") +
@@ -655,7 +663,7 @@ sc.holdings <- getHoldingsFromPositions(sc.positions)
 
 write.csv(sc.holdings, file = "sc.positions.csv")
 
-candlestickHoldings("cl", sc.holdings, sc.test.data, sc.return )
+candlestickHoldings("cl", sc.holdings, sc.test.data, 18.79 )
 
 # Brent Crude
 
@@ -713,6 +721,7 @@ ggplot(monthly, aes(x = Date)) +
 cl.test.data[, index := .I]
 
 cl.enter <- cl.test.data[pred < -threshold | pred > threshold]
+cl.enter <- cl.enter[Date < "2019-09-27"]
 cl.enter$exit <- cl.enter$index + 1
 cl.enter$side <- ifelse(as.numeric(cl.enter$pred) >= 0, "sell", "buy")
 
@@ -742,7 +751,7 @@ cl.return <- ( cl.return ^ 1/9 ) * 12
 
 write.csv(cl.transactions, file = "cl.trades.csv")
 
-cl.disp.trans <- merge(cl.test.data, cl.transactions, by = c("Date"), all.x = T)
+cl.disp.trans <- merge(cl.test.data, cl.transactions, by.x = c("Date"), by.y = c("EnterDate"), all.x = T)
 cl.disp.trans$color <- ifelse(cl.disp.trans$side == "buy", "green", ifelse(cl.disp.trans$side == "sell", "red", NA))
 
 cl.disp.trans$spotPrice.y[is.na(cl.disp.trans$spotPrice.y)] <- NA
@@ -843,3 +852,27 @@ plot(pred1, which = 1)
 head(fitted(pred1))
 head(sigma(pred1))
 
+
+holdings <- list()
+
+for( index in 1:nrow(positions()) ) {
+  
+  pos <- positions[index,]
+  
+  holding <- data.table( Date = dates, Price = 0 )
+  
+  
+  holdings[[index]] <- holding
+}
+
+
+
+open.dates <- pos[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
+
+print(open.dates)
+
+holding[Date %in% open.dates]$Price <- pos$EnterPrice
+#holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
+holding$Direction <- pos$Direction
+holding$PnL <- pos$ProfitLoss
+holding[Price == 0]$Price <- NA
