@@ -120,6 +120,8 @@ indices <- lapply(energy.indices, FUN = function( s ) {
 names(indices) <- energy.indices
 
 
+ma <- function(x, n = 5){stats::filter(x, rep(1 / n, n), sides = 2)}
+
 ### Trading Strategy Params
 
 strat.rules <- list()
@@ -165,10 +167,19 @@ Sidebar {.sidebar}
 
   selectInput("benchmark",
               "Benchmark Index",
-             choices = index.Choice, 
+             choices = index.Choice,
              selected = "MSCI")
                      
-  actionButton("go", "Submit")
+  dateRangeInput("dateRange",
+               "Simulation Period",
+               start = "2019-01-01",
+               end   = Sys.Date())
+  
+  actionButton("go", "Simulate")
+  
+  start.date <- eventReactive(input$go,{
+    start.date <- format(input$dateRange[1])  
+  })
   
   commodity <- eventReactive(input$go, {
     
@@ -191,7 +202,7 @@ Sidebar {.sidebar}
     strategy <- strat.rules[[input$cmdty]]
     
     train.data <- baseline[Date < date.start]
-    test.data <- baseline[Date >= date.start]
+    test.data <- baseline[Date >= start.date()]
     test.data[, index := .I]
     
     train.model <- auto.arima(train.data$return, 
@@ -240,7 +251,7 @@ Sidebar {.sidebar}
     period <- commodity()
     current.pos <- positions()
     
-    dates <- period[Date >= date.start]$Date
+    dates <- period[Date >= start.date()]$Date
     
     results <- list()
     
@@ -253,7 +264,7 @@ Sidebar {.sidebar}
       open.dates <- holding[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
       
       holding[Date %in% open.dates]$Price <- pos$EnterPrice
-      #holding[Date %in% pos$ExitDate]$Price <- pos$ExitPrice
+  
       holding$Direction <- pos$Direction
       holding$PnL <- pos$ProfitLoss
       holding[Price == 0]$Price <- NA
@@ -296,24 +307,66 @@ Sidebar {.sidebar}
     strategy.return <- ret
   })
   
+  strategy.vol <- eventReactive(input$go, {
+    
+    period <- positions()
+    
+    vol <- sd(period$Return) * 100
+    
+    strategy.return <- vol
+  })
+    
   commodity.return <- eventReactive(input$go, {
     
-    period <- commodity()[Date >= date.start]
+    period <- commodity()[Date >= start.date()]
     
     ret <- (cumprod(1 + period$return) - 1)[nrow(period)] * 100
     
     commodity.return <- ret
   })
   
+  commodity.vol <- eventReactive(input$go, {
+    
+    period <- commodity()[Date >= start.date()]
+    
+    vol <- sd(period$return) * 100
+    
+    commodity.vol <- vol
+  })
+
   benchmark.return <- eventReactive(input$go, {
     
-    period <- benchmark()[date >= date.start]
+    period <- benchmark()[date >= start.date()]
     
     ret <- (cumprod(1 + period$return) - 1)[nrow(period)] * 100
     
     benchmark.return <- ret
   })
+  
+  benchmark.vol <- eventReactive(input$go, {
     
+    period <- benchmark()[date >= start.date()]
+    
+    vol <- sd(period$return) * 100
+    
+    benchmark.return <- vol
+  })
+
+  strategy.garch <- eventReactive(input$go, {
+    baseline <- commodity()
+    
+    strategy <- strat.rules[[input$cmdty]]
+    
+    test.data <- baseline[Date >= start.date()][, .(Date, return)]
+    
+    arma.garch.norm = ugarchspec(mean.model=list(armaOrder=c(1,0)),
+                             variance.model=list(garchOrder=c(1,1)))
+
+    series <- as.xts.data.table(test.data)
+    
+    strategy.garch <- ugarchfit(data=series, spec=arma.garch.norm)
+  })
+  
   chosen_strategy <- eventReactive(input$go, {
     names(strategy[strategy == input$strategy])
   })
@@ -332,17 +385,40 @@ Row {data-height=600, .tabset}
 
 renderPlotly({
   
-  data <- commodity()[Date >= date.start]
+  data <- commodity()[Date >= start.date()]
   
   start_date <- as.Date(min(data$Date))
   end_date <- as.Date(max(data$Date))
   
+  bbands <- data.frame(BBands(data[,c("high","low", "close")]))[, 1:3]
+  
+  data <- cbind(data, bbands)
+  
+  data$mavg <- ma(data$close)
+  data$direction <- ifelse(data$close >= data$open, "Increasing", "Decreasing")
+  
+  i <- list(line = list(color = '#17BECF'))
+  d <- list(line = list(color = '#7F7F7F'))
+
   p <- data %>% 
     plot_ly(x = ~Date, type = "candlestick",
             open = ~open, close = ~spotPrice,
             high = ~high, low = ~low,
             text = description(),
-            showlegend = T)
+            name = description(),
+            opacity = 0.5,
+            showlegend = T,
+            increasing = i, decreasing = d) %>%
+    add_lines(x = ~Date, y = ~mavg, name = "Mv Avg",
+            line = list(color = '#E377C2', width = 0.5),
+            hoverinfo = "none", inherit = F,
+            opacity = 1) %>%
+    add_lines(x = ~Date, y = ~dn, name = "B Bands",
+          line = list(color = '#ccc', width = 0.5),
+          legendgroup = "Bollinger Bands", inherit = F,
+          showlegend = T, hoverinfo = "none",
+          opacity = 1) %>%
+    layout(yaxis = list(title = "Price"))
   
   for(i in 1:length(holdings())){
     h <- holdings()[[i]]
@@ -352,37 +428,23 @@ renderPlotly({
                    line = list(color = ifelse(h[1]$PnL >= 0, "darkgreen", "darkred"), width = 2), 
                    text = paste("Profit / Loss: ", round(h[1]$PnL, 2)), 
                    inheret = F,
-                   showlegend = FALSE)
+                   opacity = 1,
+                   name = h$Position,
+                   showlegend = T)
   }
   
-  p
+  pv <-
+    data %>%
+     plot_ly(x=~Date, y=~volume, type='bar', name = "Volume",
+          color = ~direction, colors = c('#17BECF','#7F7F7F')) %>%
+      layout(yaxis = list(title = "Volume"))
   
-  rs <- list(visible = TRUE, x = 0.5, y = -0.055,
-             xanchor = 'center', yref = 'paper',
-             font = list(size = 9),
-             buttons = list(
-               list(count=1,
-                    label='RESET',
-                    step='all'),
-               list(count=1,
-                    label='1 YR',
-                    step='year',
-                    stepmode='backward'),
-               list(count=3,
-                    label='3 MO',
-                    step='month',
-                    stepmode='backward'),
-               list(count=1,
-                    label='1 MO',
-                    step='month',
-                    stepmode='backward')
-             ))
   
-  pp <- subplot(p, heights = c(1), nrows=1,
+  pp <- subplot(p, pv, heights = c(0.7,0.2), nrows = 2,
                 shareX = TRUE, titleY = TRUE) %>%
     layout(title = paste( description(), " Trading Strategy ", format(start_date, "%b %d %Y"), "-", format(end_date, "%b %d %Y")),
-           xaxis = list(rangeselector = rs),
-           legend = list(orientation = 'h', x = 0.5, y = 1,
+           xaxis = list(rangeslider = list(visible = F)),
+           legend = list(orientation = 'v', x = -0.1, y = .5,
                          xanchor = 'center', yref = 'paper',
                          font = list(size = 10),
                          bgcolor = 'transparent'))
@@ -464,7 +526,7 @@ Row {.tabset .tabset-fade}
 ```{r}
 renderDataTable({
   performance.metrics()
-})
+}, options = list(searching = FALSE, lengthChange = FALSE, paging = FALSE))
 
 ```
 
@@ -473,23 +535,25 @@ renderDataTable({
 ```{r}
 renderDataTable({
   positions()
-})
-
-```
-
-### Growth
-
-```{r}
-renderDataTable({
-})
+}, options = list(searching = FALSE, lengthChange = FALSE))
 
 ```
 
 ### Volatility
 
 ```{r}
-renderDataTable({
-
+renderPlot({
+  plot(strategy.garch(), which=3)
 })
+
+```
+
+### Value-at-Risk
+
+```{r}
+renderPlot({
+  plot(strategy.garch(), which=2)
+})
+
 
 ```
