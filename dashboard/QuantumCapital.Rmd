@@ -181,6 +181,10 @@ Sidebar {.sidebar}
     start.date <- format(input$dateRange[1])  
   })
   
+  end.date <- eventReactive(input$go,{
+    end.date <- format(input$dateRange[2])  
+  })
+  
   commodity <- eventReactive(input$go, {
     
     commodity <- as.data.table(commodites[[input$cmdty]])
@@ -202,7 +206,7 @@ Sidebar {.sidebar}
     strategy <- strat.rules[[input$cmdty]]
     
     train.data <- baseline[Date < date.start]
-    test.data <- baseline[Date >= start.date()]
+    test.data <- baseline[Date >= start.date() & Date <= end.date()]
     test.data[, index := .I]
     
     train.model <- auto.arima(train.data$return, 
@@ -318,7 +322,7 @@ Sidebar {.sidebar}
     
   commodity.return <- eventReactive(input$go, {
     
-    period <- commodity()[Date >= start.date()]
+    period <- commodity()[Date >= start.date() & Date <= end.date()]
     
     ret <- (cumprod(1 + period$return) - 1)[nrow(period)] * 100
     
@@ -327,7 +331,7 @@ Sidebar {.sidebar}
   
   commodity.vol <- eventReactive(input$go, {
     
-    period <- commodity()[Date >= start.date()]
+    period <- commodity()[Date >= start.date() & Date <= end.date()]
     
     vol <- sd(period$return) * 100
     
@@ -336,7 +340,7 @@ Sidebar {.sidebar}
 
   benchmark.return <- eventReactive(input$go, {
     
-    period <- benchmark()[date >= start.date()]
+    period <- benchmark()[date >= start.date() & date <= end.date()]
     
     ret <- (cumprod(1 + period$return) - 1)[nrow(period)] * 100
     
@@ -345,7 +349,7 @@ Sidebar {.sidebar}
   
   benchmark.vol <- eventReactive(input$go, {
     
-    period <- benchmark()[date >= start.date()]
+    period <- benchmark()[date >= start.date() & date <= end.date()]
     
     vol <- sd(period$return) * 100
     
@@ -357,7 +361,7 @@ Sidebar {.sidebar}
     
     strategy <- strat.rules[[input$cmdty]]
     
-    test.data <- baseline[Date >= start.date()][, .(Date, return)]
+    test.data <- baseline[Date >= start.date() & Date <= end.date()][, .(Date, return)]
     
     arma.garch.norm = ugarchspec(mean.model=list(armaOrder=c(1,0)),
                              variance.model=list(garchOrder=c(1,1)))
@@ -385,7 +389,7 @@ Row {data-height=600, .tabset}
 
 renderPlotly({
   
-  data <- commodity()[Date >= start.date()]
+  data <- commodity()[Date >= start.date() & Date <= end.date()]
   
   start_date <- as.Date(min(data$Date))
   end_date <- as.Date(max(data$Date))
@@ -554,6 +558,5 @@ renderPlot({
 renderPlot({
   plot(strategy.garch(), which=2)
 })
-
 
 ```
