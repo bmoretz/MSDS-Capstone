@@ -45,11 +45,16 @@ setwd(data.path)
 theme_set(theme_light())
 
 # Theme Overrides
-theme_update(plot.title = element_text(hjust = 0.5),
-             axis.text.x = element_text(size = 10),
+theme_update(axis.text.x = element_text(size = 10),
              axis.text.y = element_text(size = 10),
+             plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "darkgreen"),
              axis.title = element_text(face = "bold", size = 12, colour = "steelblue4"),
-             legend.position = "top", legend.title = element_blank())
+             plot.subtitle = element_text(face = "bold", size = 8, colour = "darkred"),
+             legend.title = element_text(size = 12, color = "darkred", face = "bold"),
+             legend.position = "right", legend.title.align=0.5,
+             panel.border = element_rect(linetype = "solid", 
+                                         colour = "lightgray"), 
+             plot.margin = unit(c( 0.1, 0.1, 0.1, 0.1), "inches"))
 
 # Data files
 data.energy <- read_csv( file = "northwestern_energy_all_energy_ohlc.csv") 
@@ -498,6 +503,36 @@ commodity.long %>%
   ylab("distribution") +
   theme_update(plot.title = element_text(hjust = 0.5))
 
+unique(commodity.long$Symbol)
+
+commodity.long[Symbol != 'HO'] %>%
+  ggplot(aes(x = Return, y = ..density..)) +
+  geom_density( alpha = 1) +
+  geom_histogram(aes(fill = Description), alpha = 0.45, binwidth = 0.01) +
+  facet_wrap(~Symbol) +
+  ggtitle("Returns Density Since 2013") +
+  xlab("Returns") +
+  ylab("Distribution") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+commodity.long[, Growth := cumsum(Return), by = Symbol]
+commodity.long[, Cum := (1 + exp(Growth))]
+
+commodity.long[Symbol != "VE"] %>%
+  ggplot(aes(x = Date, y = Growth)) +
+  geom_line(aes(col = Description)) +
+  ggtitle("Growth") +
+  xlab("Date") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+commodity.long[Symbol != "VE"] %>%
+  ggplot(aes(x = Date, y = Cum)) +
+  geom_line(aes(col = Description)) +
+  ggtitle("Growth") +
+  xlab("Date") +
+  theme_update(plot.title = element_text(hjust = 0.5))
+
+
 # rolling sd
 
 window <- 10
@@ -702,21 +737,22 @@ cl.test.model <- Arima(cl.test.data$return, model = cl.train.model)
 
 cl.test.data$pred <- fitted(cl.test.model)
 
-cl.threshold <- 0.02
+cl.threshold <- 0.0175
 
 ggplot(cl.test.data, aes(x = Date)) +
-  geom_line(aes(y = return), lwd = .5, col = "black") +
-  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
-  geom_hline(aes(yintercept = cl.threshold), col = "green", lwd = .8, alpha = .7) +
-  geom_hline(aes(yintercept = -cl.threshold), col = "red", lwd = .7, alpha = .7) +
-  labs(title = "Brent Actual vs. Pred", y = "Return")
+  geom_line(aes(y = return), lwd = .7, alpha = .6, col = "black") +
+  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 3) +
+  geom_hline(aes(yintercept = cl.threshold), col = "darkgreen", lwd = .8, alpha = .7) +
+  geom_hline(aes(yintercept = -cl.threshold), col = "darkred", lwd = .8, alpha = .7) +
+  labs(title = "Actual vs. Pred", y = "Return") +
+  scale_y_continuous(limits = c(-.05, .05))
 
 monthly <- cl.test.data[Date >= "2019-1-1" & Date < "2019-2-1"]
 
 ggplot(monthly, aes(x = Date)) +
   geom_line(aes(y = return), lwd = .5, col = "black") +
   geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
-  labs(title = "WTI Actual vs. Pred", y = "Return")
+  labs(title = "Actual vs. Pred", y = "Return")
 
 cl.test.data[, index := .I]
 
@@ -807,7 +843,8 @@ plot(forecast(sc.test.model, h = 10))
 arma.garch.norm = ugarchspec(mean.model=list(armaOrder=c(1,0)),
                              variance.model=list(garchOrder=c(1,1)))
 
-sc.xts <- as.xts.data.table(cl.train.data)
+cl.xts <- as.xts.data.table(cl.train.data[, .(Date, return)])
+sc.xts <- as.xts.data.table(sc.train.data[, .(Date, return)])
 
 sc.garch.norm = ugarchfit(data=cl.xts, spec=arma.garch.norm)
 
@@ -817,11 +854,15 @@ e = residuals(cl.garch.norm, standardize=TRUE)
 
 fitdistr(e,"t")
 
-cl.arma.garch.t = ugarchspec(mean.model=list(armaOrder=c(1,0)),
+arma.garch.t = ugarchspec(mean.model=list(armaOrder=c(1,0)),
                              variance.model=list(garchOrder=c(1,1)),
                              distribution.model = "std")
 
-cl.garch.t = ugarchfit(data=sc.xts, spec=arma.garch.t)
+cl.garch.t = ugarchfit( data = cl.xts, spec = arma.garch.t)
+sc.garch.t <- ugarchfit( data = sc.xts, spec = arma.garch.t)
+
+show(sc.garch.t)
+plot(sc.garch.t)
 
 show(cl.garch.t)
 
@@ -831,14 +872,14 @@ par(mfrow = c(3,2))
 for(i in c(1, 2, 5, 6, 7, 13)) plot(cl.garch.t, which=i)
 
 par(mfrow=c(1,1))
-plot(cl.garch.t, which=1)
+plot(cl.garch.t, which=4)
 
 par(mfrow=c(2,1))
 plot(cl.garch.t, which=3)
 plot(cl.garch.t, which=2)
 
 par(mfrow=c(2,1))
-plot(cl.garch.t, which=4)
+plot(cl.garch.t, which=11)
 plot(cl.garch.t, which=8)
 
 par(mfrow = c(3,2))
