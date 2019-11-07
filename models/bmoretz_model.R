@@ -866,7 +866,6 @@ for( index in 1:nrow(positions()) ) {
 }
 
 
-
 open.dates <- pos[Date >= pos$EnterDate][Date <= pos$ExitDate]$Date
 
 print(open.dates)
@@ -876,3 +875,114 @@ holding[Date %in% open.dates]$Price <- pos$EnterPrice
 holding$Direction <- pos$Direction
 holding$PnL <- pos$ProfitLoss
 holding[Price == 0]$Price <- NA
+
+
+
+# Gasoline
+
+
+rb.baseline <- as.data.table(commodites[["rb"]])
+rb.baseline[, 
+            Date := nymex_date][, 
+                                nymex_date := NULL]
+
+rb.train.data <- rb.baseline[Date < "2019-1-1"]
+rb.test.data <- rb.baseline[Date >= "2019-1-1"]
+
+ggAcf(rb.train.data$return) +
+  ggtitle("WTI Autocorrelation")
+
+ggAcf(rb.train.data$return)$data
+
+Box.test(rb.baseline$return, lag = 4, type = "Ljung-Box")
+
+rb.train.model <- auto.arima(rb.train.data$return, ic = "bic",
+                             max.p = 4,
+                             max.q = 1,
+                             d = 1.5)
+
+rb.test.model <- Arima(sc.test.data$return, model = rb.train.model)
+rb.test.data$pred <- fitted(rb.test.model)
+
+ggplot(rb.test.data, aes(x = Date)) +
+  geom_line(aes(y = return), lwd = .5, col = "black") +
+  geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 2) +
+  geom_hline(aes(yintercept = .015), col = "green", lwd = .8, alpha = .7) +
+  geom_hline(aes(yintercept = -.02), col = "red", lwd = .8, alpha = .7) +
+  labs(title = "WTI Actual vs. Pred", y = "Return")
+
+threshold <- 0.015
+
+rb.test.data[, index := .I]
+
+rb.enter <- rb.test.data[pred < -threshold | pred > threshold]
+rb.enter$exit <- rb.enter$index + 3
+
+rb.enter <- rb.enter[exit < max(rb.test.data$index)]
+
+rb.enter$side <- ifelse(as.numeric(rb.enter$pred) >= 0, "buy", "sell")
+
+rb.exit <- rb.test.data[index %in% rb.enter$exit]
+rb.exit$exit <- 0
+rb.exit$side <- ifelse(rb.enter$side == "buy", "sell", "buy")
+
+# Convert Transactions to Positions
+
+rb.transactions <- merge(rb.enter, rb.exit, by.x = c("exit"), by.y = c("index"))
+rb.positions <- rb.transactions[, .(Position = .I,
+                                    Direction = ifelse(side.x == "buy", "Long", "Short"),
+                                    EnterDate = Date.x,
+                                    EnterPrice = spotPrice.x, 
+                                    ExitDate = Date.y,
+                                    ExitPrice = spotPrice.y)]
+rb.positions[, ProfitLoss := ifelse(Direction == "Long", ExitPrice - EnterPrice, EnterPrice - ExitPrice)]
+rb.positions[, Return := ifelse(Direction == "Long", (ExitPrice - EnterPrice)/ExitPrice, (EnterPrice - ExitPrice)/EnterPrice)]
+
+sum(rb.positions$ProfitLoss)
+
+rb.return <- merge(rb.test.data, rb.positions, by.x = c("Date"), by.y = c("EnterDate"), all.x = T)
+rb.return[is.na(rb.return$Return)] <- 0
+
+rb.return <- (cumprod(1 + rb.return$Return) - 1)[nrow(rb.test.data)] * 100
+rb.return <- ( rb.return ^ 1/12) * 12
+rb.return
+
+rb.ret <- (cumprod(1 + rb.test.data$return) - 1)[nrow(rb.test.data)] * 100
+rb.ret
+
+write.csv(rb.test.data, file = "rb.return.csv")
+
+write.csv(rb.transactions, file = "rb.return.csv")
+
+rb.transactions <- rbind(rb.enter, rb.exit)[ order(Date)][, .(Date, spotPrice, side)]
+
+rb.transactions
+
+write.csv(sc.transactions, file = "sc.trades.csv")
+
+sc.disp.trans <- merge(sc.test.data, sc.transactions, by = c("Date"), all.x = T)
+sc.disp.trans$color <- ifelse(sc.disp.trans$side == "buy", "green", ifelse(sc.disp.trans$side == "sell", "red", NA))
+
+sc.disp.trans$spotPrice.y[is.na(sc.disp.trans$spotPrice.y)] <- NA
+
+head(sc.disp.trans, 10)
+
+sc.test.data[, return := (open - close)/close]
+
+ggplot(sc.test.data[Date < "2019-2-1"]) +
+  geom_line(aes(x = Date, y = close), lwd = 1, col = "black") +
+  geom_point(data = sc.disp.trans[Date < "2019-2-1"], aes(x = Date, y = spotPrice.y, col = side), lwd = 5) +
+  labs(title = "WTI Actual vs. Pred", y = "Return") +
+  theme(legend.position = "none")
+
+symbol <- "sc"
+start_date <- "2019-1-1"
+
+candlestick(symbol, start_date, commodites)
+
+dates <- sc.test.data$Date
+sc.holdings <- getHoldingsFromPositions(sc.positions)
+
+write.csv(sc.holdings, file = "sc.positions.csv")
+
+candlestickHoldings("cl", sc.holdings, sc.test.data, 18.79 )

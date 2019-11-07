@@ -136,6 +136,11 @@ strat.rules[["sc"]] <- list(Threshold = 0.01,
                             Direction = c("sell", "buy"),
                             p = 4, q = 1, d = 0)
 
+strat.rules[["rb"]] <- list(Threshold = 0.015, 
+                            HoldingPeriod = 3,
+                            Direction = c("sell", "buy"),
+                            p = 4, q = 1, d = 1.5)
+
 date.start <- "2019-1-1"
 
 ```
@@ -145,7 +150,8 @@ Sidebar {.sidebar}
 
 ```{r input_layout}
 
-  strategy.Choice <- c("WTI" = "cl",
+  strategy.Choice <- c("Gasoline" = "rb",
+                      "WTI" = "cl",
                       "Brent" = "sc")
 
   selectInput("cmdty",
