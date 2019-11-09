@@ -742,8 +742,8 @@ cl.threshold <- 0.0175
 ggplot(cl.test.data, aes(x = Date)) +
   geom_line(aes(y = return), lwd = .7, alpha = .6, col = "black") +
   geom_line(aes(y = pred), lwd = 1.5, col = "cornflowerblue", alpha = .7, linetype = 3) +
-  geom_hline(aes(yintercept = cl.threshold), col = "darkgreen", lwd = .8, alpha = .7) +
-  geom_hline(aes(yintercept = -cl.threshold), col = "darkred", lwd = .8, alpha = .7) +
+  geom_hline(aes(yintercept = cl.threshold), col = "darkred", lwd = .8, alpha = .7) +
+  geom_hline(aes(yintercept = -cl.threshold), col = "darkgreen", lwd = .8, alpha = .7) +
   labs(title = "Actual vs. Pred", y = "Return") +
   scale_y_continuous(limits = c(-.05, .05))
 
